@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================
-Gym Enterprise AI — v3.7 | النسخة النهائية المستقرة والمحدثة
+Gym Enterprise AI — v3.8 | النسخة المستقرة النهائية (YOLOv8 Core)
 Prepared by Eng : Rafat Al-Wajeh (Rafat Hazza Qasim)
 ====================================================================
 """
@@ -61,57 +61,30 @@ def put_ar(frame, text, x, y, size=22, color=(255, 255, 255)):
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
 # ------------------------------------------------------------------
-# المحركات الآمنة
+# محرك YOLOv8 المستقر
 # ------------------------------------------------------------------
 @st.cache_resource
 def load_yolo():
     from ultralytics import YOLO
     return YOLO("yolov8n-pose.pt")
 
-def process_frame(frame, mode_type):
+def process_frame(frame):
     h, w = frame.shape[:2]
-    annotated = frame.copy()
+    res = load_yolo().track(frame, persist=True, verbose=False)[0]
+    if res.keypoints is None or res.boxes is None:
+        return frame.copy(), []
     
-    if mode_type == "hands":
-        try:
-            import mediapipe as mp
-            # استخدام الطريقة الآمنة للتحقق من وجود الحلول
-            if hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
-                mp_hands = mp.solutions.hands.Hands(
-                    static_image_mode=False, max_num_hands=2,
-                    min_detection_confidence=0.5, min_tracking_confidence=0.5
-                )
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = mp_hands.process(rgb)
-                hands_data = []
-                if results.multi_hand_landmarks:
-                    for hand_landmarks in results.multi_hand_landmarks:
-                        mp.solutions.drawing_utils.draw_landmarks(
-                            annotated, hand_landmarks, mp.solutions.hands.HAND_CONNECTIONS,
-                            mp.solutions.drawing_styles.get_default_hand_landmarks_style(),
-                            mp.solutions.drawing_styles.get_default_hand_connections_style()
-                        )
-                        lm = hand_landmarks.landmark
-                        hands_data.append({"wrist": [lm[0].x * w, lm[0].y * h]})
-                return annotated, hands_data
-            else:
-                st.error("⚠️ مكتبة MediaPipe غير مدعومة بالكامل في هذه البيئة السحابية. يرجى استخدام تحليل الجسم (YOLOv8).")
-                return annotated, []
-        except Exception as e:
-            st.error(f"خطأ في تشغيل تتبع الأصابع: {e}")
-            return annotated, []
-    else:
-        res = load_yolo().track(frame, persist=True, verbose=False)[0]
-        if res.keypoints is None or res.boxes is None:
-            return annotated, []
-        kps_all = res.keypoints.xy.cpu().numpy() if res.keypoints.xy is not None else []
-        annotated = res.plot(boxes=False, labels=False)
-        persons = []
-        for i, kp in enumerate(kps_all):
-            if len(kp) < 10:
-                continue
-            persons.append({"kps": kp})
-        return annotated, persons
+    kps_all = res.keypoints.xy.cpu().numpy() if res.keypoints.xy is not None else []
+    confs_all = res.keypoints.conf
+    confs_all = confs_all.cpu().numpy() if confs_all is not None else np.ones((len(kps_all), 17))
+    
+    annotated = res.plot(boxes=False, labels=False)
+    persons = []
+    for i, kp in enumerate(kps_all):
+        if len(kp) < 10:
+            continue
+        persons.append({"kps": kp, "conf": float(np.nanmean(confs_all[i])) if i < len(confs_all) else 0.8})
+    return annotated, persons
 
 def draw_watermark(frame):
     h, w = frame.shape[:2]
@@ -137,20 +110,14 @@ st.markdown("""
 
 st.sidebar.title("🏋️‍♂️ مركز القيادة والتحكم الذكي")
 st.sidebar.markdown("---")
-mode_ai = st.sidebar.radio("اختر وضع الذكاء الاصطناعي:", [
-    "🏃‍♂️ تحليل تمارين الجسم (YOLOv8 Pose - موصى به)",
-    "✋ تتبع الأصابع واليدين (MediaPipe Hands)"
-])
-engine_type = "hands" if "الأصابع" in mode_ai else "body"
-
-mode_action = st.sidebar.radio("وضع التشغيل:", ["📤 رفع فيديو", "📸 لقطة كاميرا (معالجة فورية)"])
+mode_action = st.sidebar.radio("وضع التشغيل:", ["📤 رفع فيديو", "📸 لقطة كاميرا (معالجة فورية مباشرة)"])
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("👨‍💻 **Eng : Rafat Al-Wajeh**  \n[WF.DIETNCHEAT.COM](https://wf.dietncheat.com)")
 
 st.markdown("""
-<div class="hero"><h2>🛡️ Gym Enterprise AI — المنصة المحدثة والمستقرة</h2>
-<p>تحليل دقيق ومباشر للصور والفيديوهات بدون أخطاء توافقية.</p></div>
+<div class="hero"><h2>🛡️ Gym Enterprise AI — النظام الذكي المستقر</h2>
+<p>معالجة فورية ومباشرة للصور والفيديوهات باعتماد محرك YOLOv8 القوي.</p></div>
 """, unsafe_allow_html=True)
 
 if mode_action.startswith("📤"):
@@ -174,7 +141,7 @@ if mode_action.startswith("📤"):
                 ret, frame = cap.read()
                 if not ret:
                     break
-                annotated, _ = process_frame(frame, engine_type)
+                annotated, _ = process_frame(frame)
                 annotated = draw_watermark(annotated)
                 out.write(annotated)
                 live.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
@@ -190,11 +157,8 @@ else:
         data = np.frombuffer(shot.getvalue(), np.uint8)
         frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
         
-        annotated, results = process_frame(frame, engine_type)
+        annotated, results = process_frame(frame)
         annotated = draw_watermark(annotated)
         
         st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
-        if results:
-            st.success("✅ تم رصد المفاصل والعناصر بنجاح تام!")
-        else:
-            st.warning("⚠️ لم يُكتشف أي عنصر واضح — تأكد من ظهور يدك أو جسمك بوضوح أمام الكاميرا.")
+        st.success("✅ تم التقاط الصورة وتحليلها وعرضها بنجاح تام!")
