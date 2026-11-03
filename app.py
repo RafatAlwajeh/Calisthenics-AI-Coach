@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================
-Gym Enterprise AI — v3.3 | النسخة النهائية الكاملة والذكية
+Gym Enterprise AI — v3.4 | النسخة النهائية الكاملة والمنظمة
 Prepared by Eng : Rafat Al-Wajeh (Rafat Hazza Qasim)
 ====================================================================
 """
@@ -280,8 +280,8 @@ st.markdown("""
 
 st.sidebar.title("🏋️‍♂️ مركز القيادة والتحكم الحي")
 st.sidebar.markdown("---")
-mode = st.sidebar.radio("وضع التشغيل:", ["📤 رفع فيديو للمعالجة الحية", "📸 لقطة كاميرا (معالجة فورية)"])
-engine = st.sidebar.radio("محرك التحليل:", ["YOLOv8 (دقيق ومتعدد)", "MediaPipe (سريع)"])
+mode = st.sidebar.radio("وضع التشغيل:", ["📤 رفع فيديو للمعالجة الحية", "📸 لقطة كاميرا (معالجة فورية مباشرة)"])
+engine = st.sidebar.radio("محرك التحليل:", ["YOLOv8 (دقيق ومتعدد)", "MediaPipe (سريع مرن)"])
 engine_key = "yolo" if engine.startswith("YOLO") else "mp"
 
 st.sidebar.markdown("---")
@@ -295,7 +295,7 @@ st.sidebar.markdown("👨‍💻 **Eng : Rafat Al-Wajeh**  \n[WF.DIETNCHEAT.COM]
 
 st.markdown("""
 <div class="hero"><h2>🛡️ Gym Enterprise AI — النظام الذكي المحدث</h2>
-<p>تحكم حي بالبارامترات أثناء المعالجة • عرض منظم ونظيف • تصحيح النصوص العربية بالكامل.</p></div>
+<p>تحكم حي بالبارامترات أثناء المعالجة • عرض منظم ونظيف • معالجة فورية مباشرة للصور.</p></div>
 """, unsafe_allow_html=True)
 
 if mode.startswith("📤"):
@@ -332,14 +332,12 @@ if mode.startswith("📤"):
                     break
                 idx += 1
                 
-                # تحديث بارامترات الأداء الحية تلقائياً من لوحة التحكم أثناء المعالجة
                 tracker.update_params(depth_angle)
                 
                 annotated, persons = detect_persons(frame, engine_key)
                 now = time.time()
                 main_angle, last_msg, msg_color = tracker.step(persons, now)
                 
-                # استخدام الرسومات المنظمة مع بارامترات اللحظة
                 annotated = draw_clean_header(annotated, tracker.stats["accepted"], tracker.bot_reps, int(now - t0), target_reps)
                 annotated = draw_left_gauge(annotated, main_angle, depth_angle)
                 annotated = draw_right_counters(annotated, tracker.stats, last_msg, msg_color)
@@ -370,20 +368,30 @@ if mode.startswith("📤"):
             c[3].metric("المراجعة ⚠️", stats["review"])
             st.download_button("📥 تنزيل الفيديو المنظم MP4", data=st.session_state["processed"], file_name="gym_clean_output.mp4", mime="video/mp4")
 else:
-    st.subheader("📸 تحليل لقطة فورية منظمة")
+    st.subheader("📸 تحليل لقطة فورية (معالجة مباشرة بمجرد الالتقاط)")
+    st.info("💡 بمجرد التقاط الصورة، يقوم النظام فوراً باستخراج المفاصل ورسم الهيكل وعرض الزاوية.")
+    
     shot = st.camera_input("التقط صورة بوضعية التمرين:")
     if shot is not None:
         data = np.frombuffer(shot.getvalue(), np.uint8)
         frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
-        annotated, persons = detect_persons(frame, engine_key)
+        
+        # معالجة فورية مباشرة باستخدام MediaPipe الأسرع والأكثر مرونة للصور الفردية
+        annotated, persons = detect_persons(frame, "mp")
+        
         if persons:
             s, e, wpt = get_arm(persons[0])
             angle = calculate_angle(s, e, wpt)
             annotated = draw_left_gauge(annotated, angle, depth_angle)
             annotated = draw_watermark(annotated)
+            
             st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
-            verdict = "ممتاز" if angle <= depth_angle else "غير كامل"
-            st.metric("زاوية الكوع", f"{int(angle)}°", delta=f"التصنيف: {verdict}")
+            verdict = "ممتاز (مستوفي العمق)" if angle <= depth_angle else "غير كامل / يحتاج نزول أكثر"
+            st.success("✅ تمت المعالجة الفورية المباشرة للقطة بنجاح تام!")
+            st.metric("زاوية الكوع المقاسة", f"{int(angle)}°", delta=f"التصنيف: {verdict}")
         else:
-            st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
-            st.warning("⚠️ لم يُكتشف أي شخص — تأكد من ظهور جسمك بوضوح أمام الكاميرا.")
+            # عرض الصورة فوراً وتحليلها كلياً حتى لو كانت قريبة لضمان عدم توقف النظام
+            annotated = draw_watermark(frame)
+            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+            st.success("✅ تم التقاط الصورة وعرضها بنجاح!")
+            st.warning("⚠️ للحصول على هيكل عظمي دقيق، تأكد من ظهور الذراع بالكامل أمام الكاميرا.")
