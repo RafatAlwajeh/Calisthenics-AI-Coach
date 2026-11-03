@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================
-Gym Enterprise AI — v4.2 | النسخة النهائية مع Widgets الإحصائيات والتحكم
+Gym Enterprise AI — v4.3 | النسخة النهائية المصححة (إصلاح تداخل الإحداثيات)
 Prepared by Eng : Rafat Al-Wajeh (Rafat Hazza Qasim)
 ====================================================================
 """
@@ -47,7 +47,7 @@ def ensure_font():
     except Exception:
         return None
 
-def put_ar(frame, text, x, y, size=22, color=(255, 255, 255)):
+def put_ar(frame, text, x, y, size=20, color=(255, 255, 255)):
     from PIL import Image, ImageDraw, ImageFont
     s = int(size)
     if s not in _font_cache:
@@ -145,9 +145,6 @@ def calculate_angle(a, b, c):
     angle = np.abs(radians * 180.0 / np.pi)
     return 360 - angle if angle > 180 else angle
 
-# ------------------------------------------------------------------
-# محرك جودة التكرار والتحدي مع البوت
-# ------------------------------------------------------------------
 class RepQualityEngine:
     def __init__(self, depth_angle=75, top_angle=160):
         self.depth_angle = depth_angle
@@ -165,11 +162,11 @@ class RepQualityEngine:
         if depth_ok and tempo_ok:
             return "accepted", "تكرار ممتاز!"
         if self.depth_angle < rep["min_angle"] <= self.depth_angle + 20:
-            return "review", "قيد المراجعة (عمق قريب)"
+            return "review", "قيد المراجعة"
         return "failed", "مرفوض (نزول غير كامل)"
 
 # ------------------------------------------------------------------
-# أدوات الرسم والتنسيق الاحترافي
+# أدوات الرسم المتوافقة نسبياً مع أبعاد الفيديو (لتجنب التداخل)
 # ------------------------------------------------------------------
 class Painter:
     WHITE = (255, 255, 255)
@@ -181,59 +178,57 @@ class Painter:
 
     @staticmethod
     def blend(frame, x1, y1, x2, y2, alpha=0.75):
+        h, w = frame.shape[:2]
+        x1, x2 = max(0, min(x1, w)), max(0, min(x2, w))
+        y1, y2 = max(0, min(y1, h)), max(0, min(y2, h))
+        if x1 >= x2 or y1 >= y2:
+            return frame
         ov = frame.copy()
         cv2.rectangle(ov, (x1, y1), (x2, y2), Painter.DARK, -1)
         return cv2.addWeighted(ov, alpha, frame, 1 - alpha, 0)
 
-def draw_clean_header(frame, accepted, bot_reps, timer_s, target, challenge_text):
+def draw_clean_header(frame, accepted, bot_reps, timer_s, target):
     h, w = frame.shape[:2]
-    x1, y1, x2, y2 = 20, 20, w - 20, 95
+    # رأسية متناسبة مع عرض الفيديو
+    x1, y1, x2, y2 = 15, 15, w - 15, min(85, int(h * 0.12))
     frame = Painter.blend(frame, x1, y1, x2, y2, 0.85)
     
-    cv2.putText(frame, f"YOU: {accepted}/{target}", (x1 + 20, y1 + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, Painter.GREEN, 2, cv2.LINE_AA)
-    cv2.putText(frame, f"BOT: {bot_reps}", (x2 - 130, y1 + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, Painter.RED, 2, cv2.LINE_AA)
-    cv2.putText(frame, f"TIME: {timer_s}s", (w // 2 - 45, y1 + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, Painter.WHITE, 2, cv2.LINE_AA)
+    cv2.putText(frame, f"YOU:{accepted}/{target}", (x1 + 15, y1 + 32), cv2.FONT_HERSHEY_SIMPLEX, 0.65, Painter.GREEN, 2, cv2.LINE_AA)
+    cv2.putText(frame, f"BOT:{bot_reps}", (x2 - 110, y1 + 32), cv2.FONT_HERSHEY_SIMPLEX, 0.65, Painter.RED, 2, cv2.LINE_AA)
+    cv2.putText(frame, f"T:{timer_s}s", (w // 2 - 30, y1 + 32), cv2.FONT_HERSHEY_SIMPLEX, 0.6, Painter.WHITE, 2, cv2.LINE_AA)
     
-    by = y2 - 20
-    bw = x2 - x1 - 40
-    cv2.rectangle(frame, (x1 + 20, by), (x1 + 20 + bw, by + 10), (50, 60, 70), -1)
+    by = y2 - 15
+    bw = x2 - x1 - 30
+    cv2.rectangle(frame, (x1 + 15, by), (x1 + 15 + bw, by + 6), (50, 60, 70), -1)
     pw = int(bw * min(1.0, accepted / max(1, target)))
     if pw:
-        cv2.rectangle(frame, (x1 + 20, by), (x1 + 20 + pw, by + 10), Painter.GREEN, -1)
-    return frame
-
-def draw_left_gauge(frame, angle, depth_angle):
-    h, w = frame.shape[:2]
-    bar_x, y1, y2 = 25, int(h * 0.28), int(h * 0.72)
-    seg = y2 - y1
-    cv2.rectangle(frame, (bar_x, y1), (bar_x + 18, y2), (40, 50, 60), -1)
-    ind_y = int(y2 - (min(angle, 180) / 180.0) * seg)
-    cv2.circle(frame, (bar_x + 9, ind_y), 10, Painter.WHITE, -1)
-    cv2.circle(frame, (bar_x + 9, ind_y), 10, (0, 0, 0), 2)
+        cv2.rectangle(frame, (x1 + 15, by), (x1 + 15 + pw, by + 6), Painter.GREEN, -1)
     return frame
 
 def draw_right_counters(frame, stats, last_msg, msg_color):
     h, w = frame.shape[:2]
-    pw = 250
-    x1, y1, x2, y2 = w - pw - 15, int(h * 0.25), w - 15, int(h * 0.62)
+    # لوحة جانبية مصغرة لا تغطي المنتصف
+    pw = min(220, int(w * 0.35))
+    x1, y1, x2, y2 = w - pw - 10, int(h * 0.18), w - 10, int(h * 0.45)
     frame = Painter.blend(frame, x1, y1, x2, y2, 0.85)
-    cx = x2 - 15
-    row = y1 + 18
-    frame = put_ar(frame, "لوحة الأداء الذكية", cx, row, 19, Painter.WHITE)
-    row += 35
-    frame = put_ar(frame, f"المقبولة: {stats['accepted']}", cx, row, 17, Painter.GREEN)
+    
+    cx = x2 - 12
+    row = y1 + 15
+    frame = put_ar(frame, "لوحة الأداء", cx, row, 16, Painter.WHITE)
     row += 28
-    frame = put_ar(frame, f"المرفوضة: {stats['failed']}", cx, row, 17, Painter.RED)
+    frame = put_ar(frame, f"المقبولة: {stats['accepted']}", cx, row, 14, Painter.GREEN)
+    row += 24
+    frame = put_ar(frame, f"المرفوضة: {stats['failed']}", cx, row, 14, Painter.RED)
+    row += 24
+    frame = put_ar(frame, f"المراجعة: {stats['review']}", cx, row, 14, Painter.AMBER)
     row += 28
-    frame = put_ar(frame, f"المراجعة: {stats['review']}", cx, row, 17, Painter.AMBER)
-    row += 35
-    frame = put_ar(frame, last_msg, cx, row, 15, msg_color)
+    frame = put_ar(frame, last_msg, cx, row, 13, msg_color)
     return frame
 
 def draw_watermark(frame):
     h, w = frame.shape[:2]
-    cv2.putText(frame, "WF.DIETNCHEAT.COM", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, Painter.GRAY, 1, cv2.LINE_AA)
-    cv2.putText(frame, "Eng: Rafat Al-Wajeh", (w - 220, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, Painter.GRAY, 1, cv2.LINE_AA)
+    cv2.putText(frame, "WF.DIETNCHEAT.COM", (15, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, Painter.GRAY, 1, cv2.LINE_AA)
+    cv2.putText(frame, "Eng: Rafat", (w - 110, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, Painter.GRAY, 1, cv2.LINE_AA)
     return frame
 
 class Tracker:
@@ -283,7 +278,7 @@ class Tracker:
         return main_angle, last_msg, msg_color
 
 # ------------------------------------------------------------------
-# واجهة Streamlit مع عناصر تحكم و Widgets تفاعلية
+# واجهة Streamlit
 # ------------------------------------------------------------------
 st.markdown("""
 <style>
@@ -308,27 +303,25 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🎛️ بارامترات الأداء الحية")
 target_reps = st.sidebar.slider("التكرارات المطلوبة:", 5, 30, 10, key="live_target")
 depth_angle = st.sidebar.slider("زاوية العمق:", 50, 110, 75, key="live_depth")
-challenge = st.sidebar.text_input("نص التحدي على الفيديو:", "Gym Enterprise AI Master", key="live_challenge")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("👨‍💻 **Eng : Rafat Al-Wajeh**  \n[WF.DIETNCHEAT.COM](https://wf.dietncheat.com)")
 
 st.markdown("""
-<div class="hero"><h2>🛡️ Gym Enterprise AI — النظام الذكي المحدث v4.2</h2>
-<p>تحكم حي بالبارامترات • عناصر Widgets تفاعلية بالكامل • عدادات ومؤشرات أداء مباشرة.</p></div>
+<div class="hero"><h2>🛡️ Gym Enterprise AI — النسخة المصححة v4.3</h2>
+<p>إصلاح تداخل الإحداثيات والشاشات • واجهة منظمة ومتناسبة تماماً مع كافة أبعاد الفيديوهات.</p></div>
 """, unsafe_allow_html=True)
 
-# Widgets رئيسية لعرض الإحصائيات الحية السريعة
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("🎯 التكرارات المستهدفة", target_reps)
-col2.metric("📐 زاوية العمق المحددة", f"{depth_angle}°")
-col3.metric("⚡ حالة النظام", "جاهز للتشغيل")
+col1.metric("🎯 المستهدفة", target_reps)
+col2.metric("📐 العمق", f"{depth_angle}°")
+col3.metric("⚡ الحالة", "جاهز")
 col4.metric("🛡️ المشرف", "Eng. Rafat")
 
 st.markdown("---")
 
 if mode.startswith("📤"):
-    st.subheader("📤 معالجة فيديو منظمة مع تحكم حي بالبارامترات")
+    st.subheader("📤 معالجة فيديو منظمة بدون تداخل")
     up = st.file_uploader("ارفع فيديو التمرين (MP4/AVI/MOV):", type=["mp4", "avi", "mov"])
     
     if up is not None:
@@ -337,7 +330,7 @@ if mode.startswith("📤"):
         tfile.close()
         st.video(tfile.name)
         
-        if st.button("🚀 بدء المعالجة الحية المنظمة"):
+        if st.button("🚀 بدء المعالجة المنظمة"):
             tracker = Tracker(depth_angle)
             progress = st.progress(0)
             status = st.empty()
@@ -349,7 +342,7 @@ if mode.startswith("📤"):
             fps = cap.get(cv2.CAP_PROP_FPS) or 30
             total = max(1, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
             
-            out_path = os.path.join(OUT_DIR, f"gym_v42_{int(time.time())}.mp4")
+            out_path = os.path.join(OUT_DIR, f"gym_v43_{int(time.time())}.mp4")
             out = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
             
             idx, shown, t0 = 0, 0, time.time()
@@ -367,8 +360,7 @@ if mode.startswith("📤"):
                 now = time.time()
                 main_angle, last_msg, msg_color = tracker.step(persons, now)
                 
-                annotated = draw_clean_header(annotated, tracker.stats["accepted"], tracker.bot_reps, int(now - t0), target_reps, challenge)
-                annotated = draw_left_gauge(annotated, main_angle, depth_angle)
+                annotated = draw_clean_header(annotated, tracker.stats["accepted"], tracker.bot_reps, int(now - t0), target_reps)
                 annotated = draw_right_counters(annotated, tracker.stats, last_msg, msg_color)
                 annotated = draw_watermark(annotated)
                 
@@ -385,7 +377,7 @@ if mode.startswith("📤"):
                 processed = f.read()
             st.session_state["processed"] = processed
             st.session_state["stats"] = tracker.stats
-            status.success("✅ تمت المعالجة بنجاح بالبارامترات المحدثة!")
+            status.success("✅ تمت المعالجة بنجاح وبدون أي تداخل!")
             
         if "processed" in st.session_state:
             stats = st.session_state["stats"]
@@ -395,30 +387,23 @@ if mode.startswith("📤"):
             c[1].metric("المقبولة ✅", stats["accepted"])
             c[2].metric("المرفوضة ❌", stats["failed"])
             c[3].metric("المراجعة ⚠️", stats["review"])
-            st.download_button("📥 تنزيل الفيديو المنظم MP4", data=st.session_state["processed"], file_name="gym_v42_output.mp4", mime="video/mp4")
+            st.download_button("📥 تنزيل الفيديو المنظم MP4", data=st.session_state["processed"], file_name="gym_v43_output.mp4", mime="video/mp4")
 else:
-    st.subheader("📸 تحليل لقطة فورية (معالجة مباشرة بمجرد الالتقاط)")
-    st.info("💡 بمجرد التقاط الصورة، يقوم النظام فوراً باستخراج المفاصل ورسم الهيكل وعرض الزاوية.")
-    
+    st.subheader("📸 تحليل لقطة فورية (معالجة مباشرة)")
     shot = st.camera_input("التقط صورة بوضعية التمرين:")
     if shot is not None:
         data = np.frombuffer(shot.getvalue(), np.uint8)
         frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
         
         annotated, persons = detect_persons(frame, engine_key)
+        annotated = draw_watermark(annotated)
         
+        st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
         if persons:
             s, e, wpt = get_arm(persons[0])
             angle = calculate_angle(s, e, wpt)
-            annotated = draw_left_gauge(annotated, angle, depth_angle)
-            annotated = draw_watermark(annotated)
-            
-            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
-            verdict = "ممتاز (مستوفي العمق)" if angle <= depth_angle else "غير كامل / يحتاج نزول أكثر"
-            st.success("✅ تمت المعالجة الفورية المباشرة للقطة بنجاح تام!")
+            verdict = "ممتاز (مستوفي العمق)" if angle <= depth_angle else "يحتاج نزول أكثر"
+            st.success("✅ تمت المعالجة الفورية بنجاح!")
             st.metric("زاوية الكوع المقاسة", f"{int(angle)}°", delta=f"التصنيف: {verdict}")
         else:
-            annotated = draw_watermark(frame)
-            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
-            st.success("✅ تم التقاط الصورة وعرضها بنجاح!")
-            st.warning("⚠️ للحصول على هيكل عظمي دقيق، تأكد من ظهور الذراع أو الجسم بوضوح أمام الكاميرا.")
+            st.success("✅ تم التقاط الصورة بنجاح!")
