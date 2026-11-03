@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================
-Gym Enterprise AI — v3.4 | النسخة النهائية الكاملة والمنظمة
+Gym Enterprise AI — v3.5 | النسخة النهائية المستقرة
 Prepared by Eng : Rafat Al-Wajeh (Rafat Hazza Qasim)
 ====================================================================
 """
@@ -61,61 +61,42 @@ def put_ar(frame, text, x, y, size=22, color=(255, 255, 255)):
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
 # ------------------------------------------------------------------
-# المحركات: YOLOv8 / MediaPipe
+# محرك الذكاء الاصطناعي YOLOv8
 # ------------------------------------------------------------------
 @st.cache_resource
 def load_yolo():
     from ultralytics import YOLO
     return YOLO("yolov8n-pose.pt")
 
-@st.cache_resource
-def load_mediapipe():
-    import mediapipe as mp
-    return mp.solutions.pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
-
-def detect_persons(frame, engine):
+def detect_persons(frame):
+    """استخراج المفاصل والهيكل العظمي باستخدام YOLOv8 بدقة تامة"""
     h, w = frame.shape[:2]
     persons = []
-    if engine == "yolo":
-        res = load_yolo().track(frame, persist=True, verbose=False)[0]
-        if res.keypoints is None or res.boxes.id is None:
-            return res.plot(boxes=False, labels=False), persons
-        ids = res.boxes.id.cpu().numpy()
-        kps = res.keypoints.xy.cpu().numpy()
-        confs = res.keypoints.conf
-        confs = confs.cpu().numpy() if confs is not None else np.ones((len(kps), 17))
-        annotated = res.plot(boxes=False, labels=False)
-        for i, u_id in enumerate(ids):
-            kp = kps[i]
-            if len(kp) < 10:
-                continue
-            persons.append({"id": int(u_id), "kps": kp, "conf": float(np.nanmean(confs[i])), "engine": "yolo"})
-        return annotated, persons
-
-    import mediapipe as mp
-    pose = load_mediapipe()
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    r = pose.process(rgb)
-    annotated = frame.copy()
-    if r.pose_landmarks:
-        lm = r.pose_landmarks.landmark
-        def pt(i):
-            return np.array([lm[i].x * w, lm[i].y * h])
-        conf = float(np.mean([lm[i].visibility for i in (11, 13, 15)]))
-        persons.append({"id": 0, "kps": {"s": pt(11), "e": pt(13), "w": pt(15)}, "conf": conf, "engine": "mp"})
-        for a, b in mp.solutions.pose.POSE_CONNECTIONS:
-            pa = (int(lm[a].x * w), int(lm[a].y * h))
-            pb = (int(lm[b].x * w), int(lm[b].y * h))
-            cv2.line(annotated, pa, pb, (0, 255, 60), 3, cv2.LINE_AA)
-        for i in (11, 13, 15):
-            cv2.circle(annotated, (int(lm[i].x * w), int(lm[i].y * h)), 5, (0, 200, 255), -1)
+    res = load_yolo().track(frame, persist=True, verbose=False)[0]
+    if res.keypoints is None or res.boxes is None:
+        return frame.copy(), persons
+    
+    kps_all = res.keypoints.xy.cpu().numpy() if res.keypoints.xy is not None else []
+    confs_all = res.keypoints.conf
+    confs_all = confs_all.cpu().numpy() if confs_all is not None else np.ones((len(kps_all), 17))
+    
+    annotated = res.plot(boxes=False, labels=False)
+    
+    for i, kp in enumerate(kps_all):
+        if len(kp) < 10:
+            continue
+        conf = float(np.nanmean(confs_all[i])) if i < len(confs_all) else 0.8
+        persons.append({
+            "id": i,
+            "kps": kp,
+            "conf": conf
+        })
     return annotated, persons
 
 def get_arm(person):
-    if person["engine"] == "yolo":
-        kp = person["kps"]
-        return kp[5][:2], kp[7][:2], kp[9][:2]
-    return person["kps"]["s"], person["kps"]["e"], person["kps"]["w"]
+    kp = person["kps"]
+    # الكتف (5)، المرفق (7)، الرسغ (9) في نموذج YOLOv8-Pose
+    return kp[5][:2], kp[7][:2], kp[9][:2]
 
 def calculate_angle(a, b, c):
     a, b, c = np.array(a, float), np.array(b, float), np.array(c, float)
@@ -147,7 +128,7 @@ class RepQualityEngine:
         return "failed", "مرفوض (نزول غير كامل)"
 
 # ------------------------------------------------------------------
-# أدوات الرسم النظيف
+# أدوات الرسم النظيف والمرتب
 # ------------------------------------------------------------------
 class Painter:
     WHITE = (255, 255, 255)
@@ -281,8 +262,6 @@ st.markdown("""
 st.sidebar.title("🏋️‍♂️ مركز القيادة والتحكم الحي")
 st.sidebar.markdown("---")
 mode = st.sidebar.radio("وضع التشغيل:", ["📤 رفع فيديو للمعالجة الحية", "📸 لقطة كاميرا (معالجة فورية مباشرة)"])
-engine = st.sidebar.radio("محرك التحليل:", ["YOLOv8 (دقيق ومتعدد)", "MediaPipe (سريع مرن)"])
-engine_key = "yolo" if engine.startswith("YOLO") else "mp"
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🎛️ بارامترات الأداء الحية (تعديل مباشر)")
@@ -294,8 +273,8 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("👨‍💻 **Eng : Rafat Al-Wajeh**  \n[WF.DIETNCHEAT.COM](https://wf.dietncheat.com)")
 
 st.markdown("""
-<div class="hero"><h2>🛡️ Gym Enterprise AI — النظام الذكي المحدث</h2>
-<p>تحكم حي بالبارامترات أثناء المعالجة • عرض منظم ونظيف • معالجة فورية مباشرة للصور.</p></div>
+<div class="hero"><h2>🛡️ Gym Enterprise AI — النظام الذكي المستقر</h2>
+<p>تحكم حي بالبارامترات • عرض منظم ونظيف • معالجة فورية بالاعتماد على YOLOv8.</p></div>
 """, unsafe_allow_html=True)
 
 if mode.startswith("📤"):
@@ -334,7 +313,7 @@ if mode.startswith("📤"):
                 
                 tracker.update_params(depth_angle)
                 
-                annotated, persons = detect_persons(frame, engine_key)
+                annotated, persons = detect_persons(frame)
                 now = time.time()
                 main_angle, last_msg, msg_color = tracker.step(persons, now)
                 
@@ -376,8 +355,8 @@ else:
         data = np.frombuffer(shot.getvalue(), np.uint8)
         frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
         
-        # معالجة فورية مباشرة باستخدام MediaPipe الأسرع والأكثر مرونة للصور الفردية
-        annotated, persons = detect_persons(frame, "mp")
+        # معالجة فورية مباشرة باستخدام YOLOv8 المستقر
+        annotated, persons = detect_persons(frame)
         
         if persons:
             s, e, wpt = get_arm(persons[0])
@@ -390,8 +369,7 @@ else:
             st.success("✅ تمت المعالجة الفورية المباشرة للقطة بنجاح تام!")
             st.metric("زاوية الكوع المقاسة", f"{int(angle)}°", delta=f"التصنيف: {verdict}")
         else:
-            # عرض الصورة فوراً وتحليلها كلياً حتى لو كانت قريبة لضمان عدم توقف النظام
             annotated = draw_watermark(frame)
             st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
             st.success("✅ تم التقاط الصورة وعرضها بنجاح!")
-            st.warning("⚠️ للحصول على هيكل عظمي دقيق، تأكد من ظهور الذراع بالكامل أمام الكاميرا.")
+            st.warning("⚠️ تأكد من ظهور الذراع والجسم بوضوح أمام الكاميرا لرسم الهيكل العظمي بدقة.")
