@@ -3,3 +3,4 @@ numpy
 ultralytics
 opencv-python-headless
 lap
+mediapipe
