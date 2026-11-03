@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================
-Ultimate Calisthenics Web App — Streamlit Edition
+Ultimate Calisthenics Enterprise AI Coach — Streamlit Edition
 Prepared by Eng : Rafat Hazza Qasim (Rafat Al-Wajeh)
 ====================================================================
 """
@@ -12,12 +12,51 @@ import numpy as np
 import tempfile
 from ultralytics import YOLO
 
-# إعداد الصفحة وتصميم الواجهة
+# إعداد الصفحة وتصميم الواجهة المؤسسية
 st.set_page_config(
-    page_title="Ultimate Calisthenics AI Coach",
+    page_title="Ultimate Calisthenics AI Coach | منصة المدرب الذكي",
     page_icon="💪",
     layout="wide"
 )
+
+# حقن أكواد CSS لدعم اللغة العربية وتوجيه العناصر من اليمين إلى اليسار (RTL) والتوافق مع الجوال
+st.markdown("""
+    <style>
+    /* توجيه كافة النصوص والعناصر من اليمين إلى اليسار */
+    html, body, [class*="css"] {
+        direction: rtl;
+        text-align: right;
+        font-family: 'Cairo', Tahoma, sans-serif;
+    }
+    
+    /* تنسيق اللوحة الجانبية */
+    section[data-testid="stSidebar"] {
+        direction: rtl;
+        text-align: right;
+        background-color: #f8f9fa;
+    }
+
+    /* تحسين مظهر الأزرار لتكون متجاوبة ومريحة للمستخدم على الجوال */
+    .stButton>button {
+        width: 100%;
+        border-radius: 10px;
+        font-weight: bold;
+        height: 3em;
+        background-color: #ff4b4b;
+        color: white;
+    }
+    
+    /* تنسيق بطاقات الإحصائيات */
+    div[data-testid="metric-container"] {
+        background-color: #ffffff;
+        border: 1px solid #e0e0e0;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        text-align: center;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # تحميل نموذج الذكاء الاصطناعي (يتم تخزينه مؤقتاً لسرعة التشغيل)
 @st.cache_resource
@@ -33,29 +72,30 @@ def calculate_angle(a, b, c):
     angle = np.abs(radians * 180.0 / np.pi)
     return 360 - angle if angle > 180 else angle
 
-# واجهة المستخدم في الموقع (Sidebar)
-st.sidebar.title("🏋️‍♂️ لوحة تحكم المدرب الذكي")
+# لوحة التحكم المؤسسية في الشريط الجانبي (Sidebar)
+st.sidebar.title("🏋️‍♂️ لوحة تحكم النظام المؤسسي")
 st.sidebar.markdown("---")
-app_mode = st.sidebar.selectbox("اختر وضع التشغيل:", ["اختبار نموذج عبر رفع فيديو (Upload Video)", "البث المباشر الحي (Live Camera)"])
+app_mode = st.sidebar.selectbox("اختر وضع التشغيل المؤسسي:", ["تحليل فيديو مسجل (AI Video Processing)", "البث المباشر الحي (Live Camera)"])
 
-target_reps = st.sidebar.slider("الهدف المطلوب (Reps):", 5, 30, 10)
-depth_angle = st.sidebar.slider("حساسية العمق (Depth Angle):", 50, 100, 75)
+target_reps = st.sidebar.slider("الهدف المستهدف للعدادات (Reps):", 5, 30, 10)
+depth_angle = st.sidebar.slider("حساسية زاوية العمق (Depth Angle):", 50, 100, 75)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 👨‍💻 إعداد وتطوير")
+st.sidebar.markdown("### 👨‍💻 إعداد وتطوير الشركة")
 st.sidebar.markdown("**Eng : Rafat Hazza Qasim**")
 st.sidebar.markdown("[WF.DIETNCHEAT.COM](https://wf.dietncheat.com)")
 
-# العنوان الرئيسي للموقع
-st.title("💪 نظام تحليل الكالسثانكس والمدرب الذكي (AI Calisthenics Coach)")
-st.markdown("منصة ذكية متكاملة لتحليل الأداء الرياضي، تصحيح الزوايا، ومنافسة الأنظمة الذكية في الوقت الفعلي.")
+# العنوان الرئيسي للمنصة
+st.title("💪 نظام تحليل الكالسثانكس والمدرب الذكي (Enterprise AI Coach)")
+st.markdown("منصة ذكية مؤسسية متكاملة لتحليل الأداء الرياضي، تتبع الهيكل العظمي في الوقت الفعلي، وتصحيح الزوايا الحركية بدقة فائقة.")
+st.markdown("---")
 
 # ==========================================
-# الخيار الأول: اختبار الموديل عبر رفع فيديو
+# الخيار الأول: تحليل فيديو مسجل مع العرض اللحظي
 # ==========================================
-if app_mode == "اختبار نموذج عبر رفع فيديو (Upload Video)":
-    st.header("📁 اختبار الموديل على فيديو مسجل")
-    uploaded_file = st.file_uploader("اختر فيديو التمرين (MP4, AVI, MOV)...", type=["mp4", "avi", "mov"])
+if app_mode == "تحليل فيديو مسجل (AI Video Processing)":
+    st.header("📁 وحدة معالجة وتحليل الفيديوهات المسجلة")
+    uploaded_file = st.file_uploader("قم بإرفاق ملف الفيديو الخاص بالتمرين (MP4, AVI, MOV)...", type=["mp4", "avi", "mov"])
 
     if uploaded_file is not None:
         # حفظ الفيديو المرفوع مؤقتاً
@@ -63,11 +103,14 @@ if app_mode == "اختبار نموذج عبر رفع فيديو (Upload Video)"
         tfile.write(uploaded_file.read())
         video_path = tfile.name
 
-        st.video(video_path)
+        st.info("تم إرفاق الفيديو بنجاح. انقر أدناه لبدء تطبيق خوارزميات الذكاء الاصطناعي ومعالجة الإطارات لحظة بلحظة.")
         
-        if st.button("🚀 بدء تحليل ومعالجة الفيديو"):
+        if st.button("🚀 بدء تشغيل خوارزميات التحليل والمعالجة"):
             progress_bar = st.progress(0)
             status_text = st.empty()
+            
+            # تخصيص مكان لعرض الفيديو المعالج إطاراً بإطار في الوقت الفعلي
+            frame_placeholder = st.empty()
             
             cap = cv2.VideoCapture(video_path)
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -75,18 +118,18 @@ if app_mode == "اختبار نموذج عبر رفع فيديو (Upload Video)"
             fps = cap.get(cv2.CAP_PROP_FPS) or 30
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-            output_path = "processed_output.mp4"
-            out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'avc1'), fps, (w, h))
-
             stage = "up"
             counter = 0
             frame_idx = 0
+
+            status_text.text("⚙️ جاري معالجة الإطارات وتطبيق خوارزميات الهيكل العظمي...")
 
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
                     break
 
+                # تطبيق نموذج YOLOv8 Pose على الإطار الحالي
                 results = model.track(frame, persist=True, verbose=False)
                 annotated = results[0].plot(boxes=False, labels=False)
 
@@ -109,35 +152,36 @@ if app_mode == "اختبار نموذج عبر رفع فيديو (Upload Video)"
                 except Exception:
                     pass
 
-                # رسم إحصائيات بسيطة على الفيديو
+                # رسم إحصائيات النظام المؤسسي على الإطار
                 cv2.putText(annotated, f"Reps: {counter} / {target_reps}", (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 128), 3)
-                cv2.putText(annotated, "Prepared by Eng : Rafat Hazza Qasim", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+                cv2.putText(annotated, "Enterprise AI Coach - Eng: Rafat Hazza", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
-                out.write(annotated)
+                # تحويل الألوان وعرض الإطار المعالج مباشرة للمستخدم (Real-time Streaming)
+                annotated_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+                frame_placeholder.image(annotated_rgb, channels="RGB", use_column_width=True)
+
                 frame_idx += 1
                 if total_frames > 0:
                     progress_bar.progress(min(1.0, frame_idx / total_frames))
 
             cap.release()
-            out.release()
-            status_text.success("✅ تمت المعالجة بنجاح!")
+            status_text.success("✅ تمت معالجة الفيديو بالكامل بنجاح بواسطة خوارزميات الشركة!")
 
-            st.markdown("### 📊 نتيجة التحليل النهائية:")
+            # لوحة مؤشرات الأداء المؤسسية النهائية
+            st.markdown("### 📊 تقرير الأداء النهائي:")
             col1, col2, col3 = st.columns(3)
             col1.metric("إجمالي العدات المقبولة", counter)
-            col2.metric("الهدف المحدد", target_reps)
-            col3.metric("حالة الأداء", "ممتاز 🔥" if counter >= target_reps else "جيد، استمر 💪")
-
-            st.video(output_path)
+            col2.metric("الهدف المؤسسي المحدد", target_reps)
+            col3.metric("تقييم مستوى الأداء", "مستوى قياسي 🔥" if counter >= target_reps else "جيد، يتطلب تحسين 💪")
 
 # ==========================================
 # الخيار الثاني: البث الحي (Live Camera)
 # ==========================================
 elif app_mode == "البث المباشر الحي (Live Camera)":
-    st.header("🎥 البث المباشر والتحليل اللحظي")
-    st.info("ملاحظة: يتطلب تشغيل الكاميرا الحية السماح للمتصفح بالوصول إليها.")
+    st.header("🎥 وحدة البث المباشر والتحليل اللحظي للمنشآت")
+    st.info("ملاحظة: يتطلب تشغيل الكاميرا الحية السماح للمتصفح بالوصول إلى الكاميرا من جهازك (جوال أو لابتوب).")
     
-    run_cam = st.checkbox("تشغيل الكاميرا المباشرة")
+    run_cam = st.checkbox("تفعيل وتشغيل البث المباشر")
     
     if run_cam:
         cam_placeholder = st.empty()
@@ -149,7 +193,7 @@ elif app_mode == "البث المباشر الحي (Live Camera)":
         while run_cam and cap.isOpened():
             ret, frame = cap.read()
             if not ret:
-                st.warning("تعذر الوصول إلى الكاميرا.")
+                st.warning("تعذر الوصول إلى كاميرا الجهاز.")
                 break
 
             frame = cv2.flip(frame, 1)
@@ -177,11 +221,9 @@ elif app_mode == "البث المباشر الحي (Live Camera)":
 
             h, w = frame.shape[:2]
             cv2.putText(annotated, f"Live Reps: {counter}", (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 128), 3)
-            cv2.putText(annotated, "Prepared by Eng : Rafat Hazza Qasim", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+            cv2.putText(annotated, "Enterprise AI Coach - Eng: Rafat Hazza", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
-            cam_placeholder.image(annotated, channels="BGR", use_column_width=True)
-            
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            annotated_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+            cam_placeholder.image(annotated_rgb, channels="RGB", use_column_width=True)
 
         cap.release()
