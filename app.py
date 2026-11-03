@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================
-Gym Enterprise AI — v3.5 | النسخة النهائية المستقرة
+Gym Enterprise AI — v3.6 | النسخة الشاملة (تتبع الجسم + تتبع الأصابع واليدين)
 Prepared by Eng : Rafat Al-Wajeh (Rafat Hazza Qasim)
 ====================================================================
 """
@@ -61,42 +61,67 @@ def put_ar(frame, text, x, y, size=22, color=(255, 255, 255)):
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
 # ------------------------------------------------------------------
-# محرك الذكاء الاصطناعي YOLOv8
+# المحركات: YOLOv8 (للجسم) / MediaPipe Hands (للأصابع واليدين)
 # ------------------------------------------------------------------
 @st.cache_resource
 def load_yolo():
     from ultralytics import YOLO
     return YOLO("yolov8n-pose.pt")
 
-def detect_persons(frame):
-    """استخراج المفاصل والهيكل العظمي باستخدام YOLOv8 بدقة تامة"""
-    h, w = frame.shape[:2]
-    persons = []
-    res = load_yolo().track(frame, persist=True, verbose=False)[0]
-    if res.keypoints is None or res.boxes is None:
-        return frame.copy(), persons
-    
-    kps_all = res.keypoints.xy.cpu().numpy() if res.keypoints.xy is not None else []
-    confs_all = res.keypoints.conf
-    confs_all = confs_all.cpu().numpy() if confs_all is not None else np.ones((len(kps_all), 17))
-    
-    annotated = res.plot(boxes=False, labels=False)
-    
-    for i, kp in enumerate(kps_all):
-        if len(kp) < 10:
-            continue
-        conf = float(np.nanmean(confs_all[i])) if i < len(confs_all) else 0.8
-        persons.append({
-            "id": i,
-            "kps": kp,
-            "conf": conf
-        })
-    return annotated, persons
+@st.cache_resource
+def load_mp_hands():
+    import mediapipe as mp
+    return mp.solutions.hands.Hands(
+        static_image_mode=False,
+        max_num_hands=2,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    )
 
-def get_arm(person):
-    kp = person["kps"]
-    # الكتف (5)، المرفق (7)، الرسغ (9) في نموذج YOLOv8-Pose
-    return kp[5][:2], kp[7][:2], kp[9][:2]
+def process_frame(frame, mode_type):
+    """معالجة الإطار بناءً على اختيار المستخدم (جسم أو أصابع يد)"""
+    h, w = frame.shape[:2]
+    annotated = frame.copy()
+    
+    if mode_type == "hands":
+        import mediapipe as mp
+        mp_hands = load_mp_hands()
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = mp_hands.process(rgb)
+        
+        hands_data = []
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                # رسم الهيكل العظمي والنقاط الحمراء على الأصابع (مطابق للصور المرجعية)
+                mp.solutions.drawing_utils.draw_landmarks(
+                    annotated,
+                    hand_landmarks,
+                    mp.solutions.hands.HAND_CONNECTIONS,
+                    mp.solutions.drawing_styles.get_default_hand_landmarks_style(),
+                    mp.solutions.drawing_styles.get_default_hand_connections_style()
+                )
+                # استخراج إحداثيات المعصم وبداية الأصابع
+                lm = hand_landmarks.landmark
+                hands_data.append({"wrist": [lm[0].x * w, lm[0].y * h], "index_tip": [lm[8].x * w, lm[8].y * h]})
+        return annotated, hands_data
+
+    else:
+        # محرك YOLOv8 للجسم
+        res = load_yolo().track(frame, persist=True, verbose=False)[0]
+        if res.keypoints is None or res.boxes is None:
+            return annotated, []
+        
+        kps_all = res.keypoints.xy.cpu().numpy() if res.keypoints.xy is not None else []
+        confs_all = res.keypoints.conf
+        confs_all = confs_all.cpu().numpy() if confs_all is not None else np.ones((len(kps_all), 17))
+        
+        annotated = res.plot(boxes=False, labels=False)
+        persons = []
+        for i, kp in enumerate(kps_all):
+            if len(kp) < 10:
+                continue
+            persons.append({"kps": kp, "conf": float(np.nanmean(confs_all[i])) if i < len(confs_all) else 0.8})
+        return annotated, persons
 
 def calculate_angle(a, b, c):
     a, b, c = np.array(a, float), np.array(b, float), np.array(c, float)
@@ -105,30 +130,7 @@ def calculate_angle(a, b, c):
     return 360 - angle if angle > 180 else angle
 
 # ------------------------------------------------------------------
-# محرك جودة التكرار
-# ------------------------------------------------------------------
-class RepQualityEngine:
-    def __init__(self, depth_angle=75, top_angle=160):
-        self.depth_angle = depth_angle
-        self.top_angle = top_angle
-
-    def new_rep(self):
-        return {"stage": "up", "min_angle": 180.0, "rep_start": None, "conf_sum": 0.0, "conf_n": 0}
-
-    def close_rep(self, rep, now):
-        duration = (now - rep["rep_start"]) if rep["rep_start"] else 99.0
-        depth_ok = rep["min_angle"] <= self.depth_angle
-        tempo_ok = 0.5 <= duration <= 8.0
-        avg_conf = (rep["conf_sum"] / rep["conf_n"]) if rep["conf_n"] else 0.0
-        conf_ok = avg_conf >= 0.5
-        if depth_ok and tempo_ok and conf_ok:
-            return "accepted", "تكرار ممتاز!"
-        if (not conf_ok) or (self.depth_angle < rep["min_angle"] <= self.depth_angle + 15):
-            return "review", "قيد المراجعة"
-        return "failed", "مرفوض (نزول غير كامل)"
-
-# ------------------------------------------------------------------
-# أدوات الرسم النظيف والمرتب
+# أدوات الرسم والنظام
 # ------------------------------------------------------------------
 class Painter:
     WHITE = (255, 255, 255)
@@ -144,49 +146,6 @@ class Painter:
         cv2.rectangle(ov, (x1, y1), (x2, y2), Painter.DARK, -1)
         return cv2.addWeighted(ov, alpha, frame, 1 - alpha, 0)
 
-def draw_clean_header(frame, accepted, bot_reps, timer_s, target):
-    h, w = frame.shape[:2]
-    x1, y1, x2, y2 = 20, 20, w - 20, 90
-    frame = Painter.blend(frame, x1, y1, x2, y2, 0.85)
-    cv2.putText(frame, f"YOU: {accepted}/{target}", (x1 + 25, y1 + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.9, Painter.GREEN, 2, cv2.LINE_AA)
-    cv2.putText(frame, f"BOT: {bot_reps}", (x2 - 140, y1 + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.9, Painter.RED, 2, cv2.LINE_AA)
-    cv2.putText(frame, f"TIME: {timer_s}s", (w // 2 - 50, y1 + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.8, Painter.WHITE, 2, cv2.LINE_AA)
-    by = y2 - 18
-    bw = x2 - x1 - 50
-    cv2.rectangle(frame, (x1 + 25, by), (x1 + 25 + bw, by + 8), (50, 60, 70), -1)
-    pw = int(bw * min(1.0, accepted / max(1, target)))
-    if pw:
-        cv2.rectangle(frame, (x1 + 25, by), (x1 + 25 + pw, by + 8), Painter.GREEN, -1)
-    return frame
-
-def draw_left_gauge(frame, angle, depth_angle):
-    h, w = frame.shape[:2]
-    bar_x, y1, y2 = 25, int(h * 0.25), int(h * 0.75)
-    seg = y2 - y1
-    cv2.rectangle(frame, (bar_x, y1), (bar_x + 18, y2), (40, 50, 60), -1)
-    ind_y = int(y2 - (min(angle, 180) / 180.0) * seg)
-    cv2.circle(frame, (bar_x + 9, ind_y), 12, Painter.WHITE, -1)
-    cv2.circle(frame, (bar_x + 9, ind_y), 12, (0, 0, 0), 2)
-    return frame
-
-def draw_right_counters(frame, stats, last_msg, msg_color):
-    h, w = frame.shape[:2]
-    pw = 240
-    x1, y1, x2, y2 = w - pw - 15, int(h * 0.25), w - 15, int(h * 0.60)
-    frame = Painter.blend(frame, x1, y1, x2, y2, 0.80)
-    cx = x2 - 15
-    row = y1 + 15
-    frame = put_ar(frame, "لوحة الأداء الذكية", cx, row, 20, Painter.WHITE)
-    row += 35
-    frame = put_ar(frame, f"المقبولة: {stats['accepted']}", cx, row, 18, Painter.GREEN)
-    row += 28
-    frame = put_ar(frame, f"المرفوضة: {stats['failed']}", cx, row, 18, Painter.RED)
-    row += 28
-    frame = put_ar(frame, f"المراجعة: {stats['review']}", cx, row, 18, Painter.AMBER)
-    row += 35
-    frame = put_ar(frame, last_msg, cx, row, 16, msg_color)
-    return frame
-
 def draw_watermark(frame):
     h, w = frame.shape[:2]
     cv2.putText(frame, "WF.DIETNCHEAT.COM", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, Painter.GRAY, 1, cv2.LINE_AA)
@@ -194,57 +153,7 @@ def draw_watermark(frame):
     return frame
 
 # ------------------------------------------------------------------
-# حلقة التتبع مع التحديث الحي للمتغيرات
-# ------------------------------------------------------------------
-class Tracker:
-    def __init__(self, depth_angle, top_angle=160):
-        self.qe = RepQualityEngine(depth_angle, top_angle)
-        self.users = {}
-        self.stats = {"performed": 0, "accepted": 0, "failed": 0, "review": 0}
-        self.bot_reps = 0
-        self.bot_next = time.time() + 3.0
-
-    def update_params(self, depth_angle):
-        self.qe.depth_angle = depth_angle
-
-    def step(self, persons, now):
-        last_msg, msg_color = "ابدأ التمرين!", Painter.GRAY
-        main_angle = 180.0
-        for i, p in enumerate(persons):
-            s, e, wpt = get_arm(p)
-            angle = calculate_angle(s, e, wpt)
-            if i == 0:
-                main_angle = angle
-            u_id = p["id"]
-            if u_id not in self.users:
-                self.users[u_id] = {"rep": self.qe.new_rep(), "ok": 0}
-            rep = self.users[u_id]["rep"]
-            if angle > self.qe.top_angle:
-                rep["stage"] = "up"
-            if angle < self.qe.depth_angle and rep["stage"] == "up":
-                rep["stage"] = "down"
-                rep["rep_start"] = now
-                rep["min_angle"] = angle
-            if rep["stage"] == "down":
-                rep["min_angle"] = min(rep["min_angle"], angle)
-                rep["conf_sum"] += p["conf"]
-                rep["conf_n"] += 1
-            if angle > self.qe.top_angle and rep["stage"] == "down":
-                verdict, last_msg = self.qe.close_rep(rep, now)
-                self.stats["performed"] += 1
-                self.stats[verdict] += 1
-                if verdict == "accepted":
-                    self.users[u_id]["ok"] += 1
-                msg_color = {"accepted": Painter.GREEN, "failed": Painter.RED, "review": Painter.AMBER}[verdict]
-                self.users[u_id]["rep"] = self.qe.new_rep()
-        if now >= self.bot_next:
-            self.bot_reps += 1
-            import random
-            self.bot_next = now + 3.0 + random.random() * 2.0
-        return main_angle, last_msg, msg_color
-
-# ------------------------------------------------------------------
-# واجهة Streamlit وتنسيقات CSS
+# واجهة Streamlit
 # ------------------------------------------------------------------
 st.markdown("""
 <style>
@@ -259,117 +168,66 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.sidebar.title("🏋️‍♂️ مركز القيادة والتحكم الحي")
+st.sidebar.title("🏋️‍♂️ مركز القيادة والتحكم الذكي")
 st.sidebar.markdown("---")
-mode = st.sidebar.radio("وضع التشغيل:", ["📤 رفع فيديو للمعالجة الحية", "📸 لقطة كاميرا (معالجة فورية مباشرة)"])
+mode_ai = st.sidebar.radio("اختر وضع الذكاء الاصطناعي:", [
+    "✋ تقطاع الأصابع واليدين (MediaPipe Hands)",
+    "🏃‍♂️ تحليل تمارين الجسم (YOLOv8 Pose)"
+])
+engine_type = "hands" if "MediaPipe" in mode_ai else "body"
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("🎛️ بارامترات الأداء الحية (تعديل مباشر)")
-target_reps = st.sidebar.slider("التكرارات المطلوبة:", 5, 30, 10, key="live_target")
-depth_angle = st.sidebar.slider("زاوية العمق:", 50, 110, 75, key="live_depth")
-challenge = st.sidebar.text_input("نص التحدي على الفيديو:", "Gym Enterprise AI Master", key="live_challenge")
+mode_action = st.sidebar.radio("وضع التشغيل:", ["📤 رفع فيديو", "📸 لقطة كاميرا (معالجة فورية)"])
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("👨‍💻 **Eng : Rafat Al-Wajeh**  \n[WF.DIETNCHEAT.COM](https://wf.dietncheat.com)")
 
 st.markdown("""
-<div class="hero"><h2>🛡️ Gym Enterprise AI — النظام الذكي المستقر</h2>
-<p>تحكم حي بالبارامترات • عرض منظم ونظيف • معالجة فورية بالاعتماد على YOLOv8.</p></div>
+<div class="hero"><h2>🛡️ Gym Enterprise AI — وضع المفاصل والأصابع المتقدم</h2>
+<p>دعم كامل لرصد مفاصل الأصابع واليدين أونلاين مثل النماذج القياسية أو تحليل الجسم.</p></div>
 """, unsafe_allow_html=True)
 
-if mode.startswith("📤"):
-    st.subheader("📤 معالجة فيديو منظمة مع تحكم حي بالبارامترات")
-    up = st.file_uploader("ارفع فيديو التمرين (MP4/AVI/MOV):", type=["mp4", "avi", "mov"])
-    
+if mode_action.startswith("📤"):
+    st.subheader("📤 معالجة فيديو")
+    up = st.file_uploader("ارفع الفيديو:", type=["mp4", "avi", "mov"])
     if up is not None:
         tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
         tfile.write(up.read())
         tfile.close()
         st.video(tfile.name)
-        
-        if st.button("🚀 بدء المعالجة الحية المنظمة"):
-            tracker = Tracker(depth_angle)
-            progress = st.progress(0)
-            status = st.empty()
-            live = st.empty()
-            
+        if st.button("🚀 بدء المعالجة"):
             cap = cv2.VideoCapture(tfile.name)
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS) or 30
-            total = max(1, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
-            
-            out_path = os.path.join(OUT_DIR, f"gym_clean_{int(time.time())}.mp4")
+            out_path = os.path.join(OUT_DIR, f"gym_out_{int(time.time())}.mp4")
             out = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
             
-            idx, shown, t0 = 0, 0, time.time()
-            last_msg, msg_color = "ابدأ التمرين", Painter.GRAY
-            
+            live = st.empty()
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
                     break
-                idx += 1
-                
-                tracker.update_params(depth_angle)
-                
-                annotated, persons = detect_persons(frame)
-                now = time.time()
-                main_angle, last_msg, msg_color = tracker.step(persons, now)
-                
-                annotated = draw_clean_header(annotated, tracker.stats["accepted"], tracker.bot_reps, int(now - t0), target_reps)
-                annotated = draw_left_gauge(annotated, main_angle, depth_angle)
-                annotated = draw_right_counters(annotated, tracker.stats, last_msg, msg_color)
+                annotated, _ = process_frame(frame, engine_type)
                 annotated = draw_watermark(annotated)
-                
                 out.write(annotated)
-                if shown % 4 == 0:
-                    live.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
-                shown += 1
-                progress.progress(min(1.0, idx / total))
-                
+                live.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
             cap.release()
             out.release()
-            
+            st.success("✅ تمت المعالجة بنجاح!")
             with open(out_path, "rb") as f:
-                processed = f.read()
-            st.session_state["processed"] = processed
-            st.session_state["stats"] = tracker.stats
-            status.success("✅ تمت المعالجة بنجاح بالبارامترات المحدثة!")
-            
-        if "processed" in st.session_state:
-            stats = st.session_state["stats"]
-            st.markdown("### 📊 تقرير الأداء الختامي:")
-            c = st.columns(4)
-            c[0].metric("المحاولات", stats["performed"])
-            c[1].metric("المقبولة ✅", stats["accepted"])
-            c[2].metric("المرفوضة ❌", stats["failed"])
-            c[3].metric("المراجعة ⚠️", stats["review"])
-            st.download_button("📥 تنزيل الفيديو المنظم MP4", data=st.session_state["processed"], file_name="gym_clean_output.mp4", mime="video/mp4")
+                st.download_button("📥 تنزيل الفيديو المعالج", data=f.read(), file_name="processed.mp4", mime="video/mp4")
 else:
-    st.subheader("📸 تحليل لقطة فورية (معالجة مباشرة بمجرد الالتقاط)")
-    st.info("💡 بمجرد التقاط الصورة، يقوم النظام فوراً باستخراج المفاصل ورسم الهيكل وعرض الزاوية.")
-    
-    shot = st.camera_input("التقط صورة بوضعية التمرين:")
+    st.subheader("📸 تحليل لقطة فورية (معالجة مباشرة لليد أو الجسم)")
+    shot = st.camera_input("التقط صورة:")
     if shot is not None:
         data = np.frombuffer(shot.getvalue(), np.uint8)
         frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
         
-        # معالجة فورية مباشرة باستخدام YOLOv8 المستقر
-        annotated, persons = detect_persons(frame)
+        annotated, results = process_frame(frame, engine_type)
+        annotated = draw_watermark(annotated)
         
-        if persons:
-            s, e, wpt = get_arm(persons[0])
-            angle = calculate_angle(s, e, wpt)
-            annotated = draw_left_gauge(annotated, angle, depth_angle)
-            annotated = draw_watermark(annotated)
-            
-            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
-            verdict = "ممتاز (مستوفي العمق)" if angle <= depth_angle else "غير كامل / يحتاج نزول أكثر"
-            st.success("✅ تمت المعالجة الفورية المباشرة للقطة بنجاح تام!")
-            st.metric("زاوية الكوع المقاسة", f"{int(angle)}°", delta=f"التصنيف: {verdict}")
+        st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+        if results:
+            st.success("✅ تم رصد المفاصل والعناصر بنجاح تام مثل الصور المرجعية!")
         else:
-            annotated = draw_watermark(frame)
-            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
-            st.success("✅ تم التقاط الصورة وعرضها بنجاح!")
-            st.warning("⚠️ تأكد من ظهور الذراع والجسم بوضوح أمام الكاميرا لرسم الهيكل العظمي بدقة.")
+            st.warning("⚠️ لم يُكتشف أي عنصر واضح — تأكد من وضع يدك أو جسمك بابتعاد مناسب أمام الكاميرا.")
