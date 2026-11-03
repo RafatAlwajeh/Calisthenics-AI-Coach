@@ -1,6 +1,5 @@
-streamlit
-numpy
-ultralytics
-opencv-python-headless
-arabic-reshaper
-python-bidi
+streamlit>=1.32.0
+opencv-python-headless>=4.8.0
+ultralytics>=8.0.0
+numpy>=1.24.0
+plotly>=5.18.0
