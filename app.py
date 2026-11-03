@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ====================================================================
-Gym Enterprise AI — v3.6 | النسخة الشاملة (تتبع الجسم + تتبع الأصابع واليدين)
+Gym Enterprise AI — v3.7 | النسخة النهائية المستقرة والمحدثة
 Prepared by Eng : Rafat Al-Wajeh (Rafat Hazza Qasim)
 ====================================================================
 """
@@ -61,95 +61,62 @@ def put_ar(frame, text, x, y, size=22, color=(255, 255, 255)):
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
 # ------------------------------------------------------------------
-# المحركات: YOLOv8 (للجسم) / MediaPipe Hands (للأصابع واليدين)
+# المحركات الآمنة
 # ------------------------------------------------------------------
 @st.cache_resource
 def load_yolo():
     from ultralytics import YOLO
     return YOLO("yolov8n-pose.pt")
 
-@st.cache_resource
-def load_mp_hands():
-    import mediapipe as mp
-    return mp.solutions.hands.Hands(
-        static_image_mode=False,
-        max_num_hands=2,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
-    )
-
 def process_frame(frame, mode_type):
-    """معالجة الإطار بناءً على اختيار المستخدم (جسم أو أصابع يد)"""
     h, w = frame.shape[:2]
     annotated = frame.copy()
     
     if mode_type == "hands":
-        import mediapipe as mp
-        mp_hands = load_mp_hands()
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = mp_hands.process(rgb)
-        
-        hands_data = []
-        if results.multi_hand_landmarks:
-            for hand_landmarks in results.multi_hand_landmarks:
-                # رسم الهيكل العظمي والنقاط الحمراء على الأصابع (مطابق للصور المرجعية)
-                mp.solutions.drawing_utils.draw_landmarks(
-                    annotated,
-                    hand_landmarks,
-                    mp.solutions.hands.HAND_CONNECTIONS,
-                    mp.solutions.drawing_styles.get_default_hand_landmarks_style(),
-                    mp.solutions.drawing_styles.get_default_hand_connections_style()
+        try:
+            import mediapipe as mp
+            # استخدام الطريقة الآمنة للتحقق من وجود الحلول
+            if hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
+                mp_hands = mp.solutions.hands.Hands(
+                    static_image_mode=False, max_num_hands=2,
+                    min_detection_confidence=0.5, min_tracking_confidence=0.5
                 )
-                # استخراج إحداثيات المعصم وبداية الأصابع
-                lm = hand_landmarks.landmark
-                hands_data.append({"wrist": [lm[0].x * w, lm[0].y * h], "index_tip": [lm[8].x * w, lm[8].y * h]})
-        return annotated, hands_data
-
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                results = mp_hands.process(rgb)
+                hands_data = []
+                if results.multi_hand_landmarks:
+                    for hand_landmarks in results.multi_hand_landmarks:
+                        mp.solutions.drawing_utils.draw_landmarks(
+                            annotated, hand_landmarks, mp.solutions.hands.HAND_CONNECTIONS,
+                            mp.solutions.drawing_styles.get_default_hand_landmarks_style(),
+                            mp.solutions.drawing_styles.get_default_hand_connections_style()
+                        )
+                        lm = hand_landmarks.landmark
+                        hands_data.append({"wrist": [lm[0].x * w, lm[0].y * h]})
+                return annotated, hands_data
+            else:
+                st.error("⚠️ مكتبة MediaPipe غير مدعومة بالكامل في هذه البيئة السحابية. يرجى استخدام تحليل الجسم (YOLOv8).")
+                return annotated, []
+        except Exception as e:
+            st.error(f"خطأ في تشغيل تتبع الأصابع: {e}")
+            return annotated, []
     else:
-        # محرك YOLOv8 للجسم
         res = load_yolo().track(frame, persist=True, verbose=False)[0]
         if res.keypoints is None or res.boxes is None:
             return annotated, []
-        
         kps_all = res.keypoints.xy.cpu().numpy() if res.keypoints.xy is not None else []
-        confs_all = res.keypoints.conf
-        confs_all = confs_all.cpu().numpy() if confs_all is not None else np.ones((len(kps_all), 17))
-        
         annotated = res.plot(boxes=False, labels=False)
         persons = []
         for i, kp in enumerate(kps_all):
             if len(kp) < 10:
                 continue
-            persons.append({"kps": kp, "conf": float(np.nanmean(confs_all[i])) if i < len(confs_all) else 0.8})
+            persons.append({"kps": kp})
         return annotated, persons
-
-def calculate_angle(a, b, c):
-    a, b, c = np.array(a, float), np.array(b, float), np.array(c, float)
-    radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
-    angle = np.abs(radians * 180.0 / np.pi)
-    return 360 - angle if angle > 180 else angle
-
-# ------------------------------------------------------------------
-# أدوات الرسم والنظام
-# ------------------------------------------------------------------
-class Painter:
-    WHITE = (255, 255, 255)
-    GRAY = (200, 200, 200)
-    DARK = (15, 23, 42)
-    GREEN = (46, 204, 113)
-    RED = (56, 67, 235)
-    AMBER = (58, 178, 247)
-
-    @staticmethod
-    def blend(frame, x1, y1, x2, y2, alpha=0.75):
-        ov = frame.copy()
-        cv2.rectangle(ov, (x1, y1), (x2, y2), Painter.DARK, -1)
-        return cv2.addWeighted(ov, alpha, frame, 1 - alpha, 0)
 
 def draw_watermark(frame):
     h, w = frame.shape[:2]
-    cv2.putText(frame, "WF.DIETNCHEAT.COM", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, Painter.GRAY, 1, cv2.LINE_AA)
-    cv2.putText(frame, "Eng: Rafat Al-Wajeh", (w - 220, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, Painter.GRAY, 1, cv2.LINE_AA)
+    cv2.putText(frame, "WF.DIETNCHEAT.COM", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1, cv2.LINE_AA)
+    cv2.putText(frame, "Eng: Rafat Al-Wajeh", (w - 220, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
     return frame
 
 # ------------------------------------------------------------------
@@ -171,10 +138,10 @@ st.markdown("""
 st.sidebar.title("🏋️‍♂️ مركز القيادة والتحكم الذكي")
 st.sidebar.markdown("---")
 mode_ai = st.sidebar.radio("اختر وضع الذكاء الاصطناعي:", [
-    "✋ تقطاع الأصابع واليدين (MediaPipe Hands)",
-    "🏃‍♂️ تحليل تمارين الجسم (YOLOv8 Pose)"
+    "🏃‍♂️ تحليل تمارين الجسم (YOLOv8 Pose - موصى به)",
+    "✋ تتبع الأصابع واليدين (MediaPipe Hands)"
 ])
-engine_type = "hands" if "MediaPipe" in mode_ai else "body"
+engine_type = "hands" if "الأصابع" in mode_ai else "body"
 
 mode_action = st.sidebar.radio("وضع التشغيل:", ["📤 رفع فيديو", "📸 لقطة كاميرا (معالجة فورية)"])
 
@@ -182,8 +149,8 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("👨‍💻 **Eng : Rafat Al-Wajeh**  \n[WF.DIETNCHEAT.COM](https://wf.dietncheat.com)")
 
 st.markdown("""
-<div class="hero"><h2>🛡️ Gym Enterprise AI — وضع المفاصل والأصابع المتقدم</h2>
-<p>دعم كامل لرصد مفاصل الأصابع واليدين أونلاين مثل النماذج القياسية أو تحليل الجسم.</p></div>
+<div class="hero"><h2>🛡️ Gym Enterprise AI — المنصة المحدثة والمستقرة</h2>
+<p>تحليل دقيق ومباشر للصور والفيديوهات بدون أخطاء توافقية.</p></div>
 """, unsafe_allow_html=True)
 
 if mode_action.startswith("📤"):
@@ -217,7 +184,7 @@ if mode_action.startswith("📤"):
             with open(out_path, "rb") as f:
                 st.download_button("📥 تنزيل الفيديو المعالج", data=f.read(), file_name="processed.mp4", mime="video/mp4")
 else:
-    st.subheader("📸 تحليل لقطة فورية (معالجة مباشرة لليد أو الجسم)")
+    st.subheader("📸 تحليل لقطة فورية (معالجة مباشرة)")
     shot = st.camera_input("التقط صورة:")
     if shot is not None:
         data = np.frombuffer(shot.getvalue(), np.uint8)
@@ -228,6 +195,6 @@ else:
         
         st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
         if results:
-            st.success("✅ تم رصد المفاصل والعناصر بنجاح تام مثل الصور المرجعية!")
+            st.success("✅ تم رصد المفاصل والعناصر بنجاح تام!")
         else:
-            st.warning("⚠️ لم يُكتشف أي عنصر واضح — تأكد من وضع يدك أو جسمك بابتعاد مناسب أمام الكاميرا.")
+            st.warning("⚠️ لم يُكتشف أي عنصر واضح — تأكد من ظهور يدك أو جسمك بوضوح أمام الكاميرا.")
