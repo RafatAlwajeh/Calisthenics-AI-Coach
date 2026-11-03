@@ -2,5 +2,6 @@ streamlit
 numpy
 ultralytics
 opencv-python-headless
-lap
 mediapipe
+arabic-reshaper
+python-bidi
