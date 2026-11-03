@@ -1,4 +1,5 @@
 streamlit
+numpy
 ultralytics
 opencv-python-headless
-numpy
+lap
