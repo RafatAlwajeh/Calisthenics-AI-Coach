@@ -1,6 +1,6 @@
-
-streamlit>=1.36,<2
-ultralytics>=8.2,<9
-numpy>=1.24,<3
-opencv-python-headless>=4.8,<5
-Pillow>=10,<13
+streamlit
+numpy
+ultralytics
+opencv-python-headless
+arabic-reshaper
+python-bidi
